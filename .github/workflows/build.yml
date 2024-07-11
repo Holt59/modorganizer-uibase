@@ -6,22 +6,80 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
+env:
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+
 jobs:
   build:
     runs-on: windows-2022
     steps:
-      - name: Build UI Base
-        id: build-uibase
-        uses: ModOrganizer2/build-with-mob-action@master
+      # https://learn.microsoft.com/en-us/vcpkg/consume/binary-caching-github-actions-cache
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@v7
         with:
-          mo2-third-parties: gtest spdlog boost
-          mo2-dependencies: cmake_common
-          mo2-cmake-command: -DUIBASE_TESTS=1 ..
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
-      - name: Build UI Base Tests
-        run: cmake --build vsbuild --config RelWithDebInfo -j4 --target uibase-tests
-        working-directory: ${{ steps.build-uibase.outputs.working-directory }}
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: 6.7.0
+          modules:
+          cache: true
+
+      - uses: actions/checkout@v4
+      - uses: lukka/run-vcpkg@v11
+
+      - name: Configure UI Base build
+        shell: pwsh
+        run: |
+          cmake --preset vs2022-windows `
+            "-DCMAKE_PREFIX_PATH=${env:QT_ROOT_DIR}\msvc2019_64" `
+            "-DCMAKE_INSTALL_PREFIX=install" -DUIBASE_TESTING=ON
+
+      # build both Debug and RelWithDebInfo for package
+      - name: Build UI Base
+        run: |
+          cmake --build vsbuild --config Debug --target uibase-tests --verbose
+          cmake --build vsbuild --config RelWithDebInfo --target uibase-tests --verbose
 
       - name: Test UI Base
-        run: ctest --test-dir vsbuild -C RelWithDebInfo --output-on-failure
-        working-directory: ${{ steps.build-uibase.outputs.working-directory }}
+        run: |
+          ctest --test-dir vsbuild -C Debug --output-on-failure
+          ctest --test-dir vsbuild -C RelWithDebInfo --output-on-failure
+
+      - name: Install UI Base
+        run: |
+          cmake --install vsbuild --config Debug
+          cmake --install vsbuild --config RelWithDebInfo
+
+      # this tests that UI Base can be properly used as a CMake package
+      - name: Test UI Base package
+        run: |
+          cmake -B build . "-DCMAKE_PREFIX_PATH=${env:QT_ROOT_DIR}\msvc2019_64;..\..\install\lib\cmake\"
+          cmake --build build --config Debug
+          cmake --build build --config Release
+          cmake --build build --config RelWithDebInfo
+        working-directory: tests/cmake
+
+      - name: Upload UI Base artifact
+        uses: actions/upload-artifact@master
+        with:
+          name: uibase
+          path: ./install
+
+      # TODO: this should only be done after a merge on master
+      - name: Create UI Base release archive
+        uses: ihiroky/archive-action@v1
+        with:
+          root_dir: install
+          file_path: uibase.zip
+
+      - name: Publish UI Base
+        uses: johnwbyrd/update-release@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          release: Nightly Release
+          tag: nightly
+          files: ./uibase.zip
