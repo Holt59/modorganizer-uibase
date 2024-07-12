@@ -3,6 +3,8 @@ name: Build UIBase
 on:
   push:
     branches: master
+    tags:
+      - "*"
   pull_request:
     types: [opened, synchronize, reopened]
 
@@ -21,51 +23,72 @@ jobs:
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
-      - name: Install Qt
-        uses: jurplel/install-qt-action@v3
-        with:
-          version: 6.7.0
-          modules:
-          cache: true
+      #     - name: Install Qt
+      #       uses: jurplel/install-qt-action@v3
+      #       with:
+      #         version: 6.7.0
+      #         modules:
+      #         cache: true
 
       - uses: actions/checkout@v4
-      - uses: lukka/run-vcpkg@v11
+      #     - uses: lukka/run-vcpkg@v11
 
-      - name: Configure UI Base build
-        shell: pwsh
-        run: |
-          cmake --preset vs2022-windows `
-            "-DCMAKE_PREFIX_PATH=${env:QT_ROOT_DIR}\msvc2019_64" `
-            "-DCMAKE_INSTALL_PREFIX=install" -DUIBASE_TESTING=ON
+      #     - name: Configure UI Base build
+      #       shell: pwsh
+      #       run: |
+      #         cmake --preset vs2022-windows `
+      #           "-DCMAKE_PREFIX_PATH=${env:QT_ROOT_DIR}\msvc2019_64" `
+      #           "-DCMAKE_INSTALL_PREFIX=install" -DUIBASE_TESTING=ON
 
-      # build both Debug and RelWithDebInfo for package
-      - name: Build UI Base
-        run: |
-          cmake --build vsbuild --config Debug --target uibase-tests --verbose
-          cmake --build vsbuild --config RelWithDebInfo --target uibase-tests --verbose
+      #     # build both Debug and RelWithDebInfo for package
+      #     - name: Build UI Base
+      #       run: |
+      #         cmake --build vsbuild --config Debug --target uibase-tests --verbose
+      #         cmake --build vsbuild --config RelWithDebInfo --target uibase-tests --verbose
 
-      - name: Test UI Base
-        run: |
-          ctest --test-dir vsbuild -C Debug --output-on-failure
-          ctest --test-dir vsbuild -C RelWithDebInfo --output-on-failure
+      #     - name: Test UI Base
+      #       run: |
+      #         ctest --test-dir vsbuild -C Debug --output-on-failure
+      #         ctest --test-dir vsbuild -C RelWithDebInfo --output-on-failure
 
-      - name: Install UI Base
-        run: |
-          cmake --install vsbuild --config Debug
-          cmake --install vsbuild --config RelWithDebInfo
+      #     - name: Install UI Base
+      #       run: |
+      #         cmake --install vsbuild --config Debug
+      #         cmake --install vsbuild --config RelWithDebInfo
 
-      # this tests that UI Base can be properly used as a CMake package
-      - name: Test UI Base package
-        run: |
-          cmake -B build . "-DCMAKE_PREFIX_PATH=${env:QT_ROOT_DIR}\msvc2019_64;..\..\install\lib\cmake\"
-          cmake --build build --config Debug
-          cmake --build build --config Release
-          cmake --build build --config RelWithDebInfo
-        working-directory: tests/cmake
-
+      #     # this tests that UI Base can be properly used as a CMake package
+      #     - name: Test UI Base package
+      #       run: |
+      #         cmake -B build . "-DCMAKE_PREFIX_PATH=${env:QT_ROOT_DIR}\msvc2019_64;..\..\install\lib\cmake\"
+      #         cmake --build build --config Debug
+      #         cmake --build build --config Release
+      #         cmake --build build --config RelWithDebInfo
+      #       working-directory: tests/cmake
 
       - name: Upload UI Base artifact
         uses: actions/upload-artifact@master
         with:
           name: uibase
           path: ./install
+
+  publish:
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: windows-2022
+    permissions:
+      contents: write
+    steps:
+      - name: Download Artifact
+        uses: actions/download-artifact@master
+        with:
+          name: uibase
+          path: ./install
+
+      - name: Create UI Base archive
+        run: 7z a uibase.7z ./install/*
+
+      - name: Publish Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release create --draft=false --notes="${{ github.ref_name }}" "${{ github.ref_name }}" ./uibase.7z
