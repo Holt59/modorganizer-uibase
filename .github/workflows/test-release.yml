@@ -1,0 +1,21 @@
+# .github/workflows/publish-release.yml
+name: Publish release
+on:
+  push:
+    tags:
+      - "*"
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - if: github.ref_type == 'tag'
+        name: Publish Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release create --draft=false --notes="${{ github.ref_name }}" "${{ github.ref_name }}" ./install/uibase.7z
